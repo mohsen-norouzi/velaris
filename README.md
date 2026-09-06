@@ -1,0 +1,43 @@
+# VELARIS
+
+A local luxury yacht experience built with React, Bun, Tailwind CSS, Three.js, and GSAP.
+
+## Run locally
+
+Install Bun, then from this directory run:
+
+```sh
+bun install
+bun run dev
+```
+
+Open the local address printed by the development server, normally http://localhost:3000.
+
+## Experience
+
+- Five distinct, fully three-dimensional yacht concepts: Horizon 88, Élan 62, Solstice 54, Meridian 76, and Aether 90.
+- Scroll to dissolve, wander, and reform the particle geometry between chapters.
+- Drag left/right to rotate through 360 degrees; drag up/down with a mouse to adjust the viewing elevation.
+- The five chapter markers and the arrow keys also navigate the voyage.
+- “Explore in 3D” clears the editorial copy; “Reset 3D view” restores the original angle.
+- Optional synthesized sea ambience starts only when enabled. The pause control freezes the ambient animation.
+- Yacht details and collection navigation open in accessible panels.
+- Mobile particle counts are reduced. System reduced-motion preferences suppress particle scattering and ambient movement.
+
+## Validation
+
+```sh
+bunx tsc --noEmit
+bun run build
+```
+
+The website uses procedural 3D geometry and shader reflections, rather than flat yacht images. All five designs and their specifications are illustrative concepts. No external model, font, photograph, or audio downloads are needed at runtime. Nothing has been deployed.
+
+## Source map
+
+- `app/page.tsx`: chapter content, navigation, detail panels, ambience.
+- `app/ocean-scene.tsx`: Three.js rendering, ocean, reflections, interaction, and morph shaders.
+- `app/yacht-geometry.ts`: deterministic surface sampling for the five yacht designs.
+- `app/globals.css`: visual styling and responsive layout.
+
+The React app uses the generated Vinext/Vite development setup. Hosting scaffolding is present but no site was registered or published.
