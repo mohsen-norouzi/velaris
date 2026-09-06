@@ -6,6 +6,8 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { makeYacht, PARTICLES } from './yacht-geometry';
+import { createSea, makeReflectionSamples } from './sea-system';
+import { CameraOrbit } from './camera-orbit';
 const vertex=`
 attribute vec4 aFrom; attribute vec4 aTo; attribute vec3 aSeed;
 uniform float uMix,uTime,uReflect,uDpr,uReduced; varying float vAlpha;varying float vGold;
@@ -16,18 +18,19 @@ void main(){
  p=mix(p,p*.25+orbit*vec3(7.0,4.0,5.0)+vec3(0.,2.,0.),burst*.88);
  p+=orbit*.016*(1.0+burst*4.0);p.y+=sin(uTime*.5)*.025;
  vAlpha=mix(aFrom.w,aTo.w,t)*(.73+.27*sin(uTime*.9+aSeed.x*60.));vGold=aSeed.y;
- if(uReflect>.5){float height=p.y;p.y=-p.y*.83-.06;p.x+=sin(p.z*5.+uTime*1.5+height*3.)*(.025+height*.045);p.z+=sin(p.x*3.-uTime*.8)*.075;vAlpha*=.37*exp(-height*.16);}
+ if(uReflect>.5){float height=p.y;p.y=-p.y*(.015+aSeed.z*1.95)-.06;p.x+=sin(p.z*5.+uTime*1.5+height*3.)*(.025+height*.045);p.z+=sin(p.x*3.-uTime*.8)*.075;vAlpha*=.95*exp(-height*.075);}
  vec4 mv=modelViewMatrix*vec4(p,1.0); gl_Position=projectionMatrix*mv;
- gl_PointSize=clamp((25.+aSeed.z*28.)*uDpr/-mv.z, .7, 4.5*uDpr);
- if(uReflect>.5)gl_PointSize*=1.45;
+ float breathing=.82+.18*sin(uTime*(.4+aSeed.y*.65)+aSeed.x*43.);
+ float glint=pow(.5+.5*sin(uTime*(.7+aSeed.x*.4)+aSeed.y*67.),8.);
+ float size=(17.+pow(aSeed.z,2.4)*49.)*breathing*(1.+glint*.32);
+ gl_PointSize=clamp(size*uDpr/-mv.z, .65*uDpr, 5.2*uDpr);
+ if(uReflect>.5)gl_PointSize*=1.6;
 }
 `;
 const fragment=`
 uniform float uReflect;uniform vec3 uColor;varying float vAlpha;varying float vGold;
 void main(){vec2 uv=gl_PointCoord-.5; if(uReflect>.5)uv.x*=1.6;float d=length(uv);if(d>.5)discard;float glow=pow(1.-d*2.,1.35);vec3 col=mix(vec3(.96,.97,.91),uColor,vGold*.65);gl_FragColor=vec4(col*vAlpha*1.42,glow*min(vAlpha,1.));}
 `;
-const waterVertex=`uniform float uTime;varying vec3 vPos;void main(){vec3 p=position;p.z+=sin(p.x*.8+uTime*.7)*.015+sin(p.y*.6-uTime*.8)*.015;vPos=vec3(p.x,p.z,p.y);gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.);}`;
-const waterFragment=`uniform float uTime;varying vec3 vPos;void main(){vec2 p=vPos.xz;float wave=sin(p.y*14.+sin(p.x*.8+uTime*.5)*2.+uTime)*.5+.5;float fine=pow(wave,24.);float path=exp(-pow(p.x*.13,2.));float fade=exp(-length(p)*.045);float shimmer=fine*path*fade*.12;vec3 c=vec3(.003,.008,.009)+vec3(.46,.43,.34)*shimmer;gl_FragColor=vec4(c,1.);}`;
 export default function OceanScene({progress,paused,resetRef}:{progress:MutableRefObject<number>;paused:boolean;resetRef:MutableRefObject<()=>void>}){
  const host=useRef<HTMLDivElement>(null),pausedRef=useRef(paused);pausedRef.current=paused;
  const [ready,setReady]=useState(false),[failed,setFailed]=useState(false);
@@ -41,28 +44,66 @@ export default function OceanScene({progress,paused,resetRef}:{progress:MutableR
   const seeds=new Float32Array(count*3);let seed=32;for(let i=0;i<seeds.length;i++){seed=(seed*1664525+1013904223)>>>0;seeds[i]=seed/4294967296}geometry.setAttribute('aSeed',new THREE.BufferAttribute(seeds,3));
   const uniforms={uMix:{value:0},uTime:{value:0},uReflect:{value:0},uDpr:{value:renderer.getPixelRatio()},uReduced:{value:reduced?1:0},uColor:{value:new THREE.Color('#dbc39a')}};
   const material=new THREE.ShaderMaterial({vertexShader:vertex,fragmentShader:fragment,uniforms,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending});const points=new THREE.Points(geometry,material);points.frustumCulled=false;yacht.add(points);
-  const reflectionMaterial=material.clone();reflectionMaterial.uniforms.uReflect.value=1;const reflection=new THREE.Points(geometry,reflectionMaterial);reflection.frustumCulled=false;yacht.add(reflection);
-  const waterGeometry=new THREE.PlaneGeometry(180,180,1,1);const waterMaterial=new THREE.ShaderMaterial({vertexShader:waterVertex,fragmentShader:waterFragment,uniforms:{uTime:{value:0}},transparent:true,depthWrite:false});const water=new THREE.Mesh(waterGeometry,waterMaterial);water.rotation.x=-Math.PI/2;water.position.y=-.075;water.renderOrder=-1;scene.add(water);
-  const seaCount=mobile?8500:17000,seaPositions=new Float32Array(seaCount*3),seaSeeds=new Float32Array(seaCount);for(let i=0;i<seaCount;i++){seaPositions[i*3]=(Math.random()-.5)*115;seaPositions[i*3+1]=-.015;seaPositions[i*3+2]=(Math.random()-.5)*105;seaSeeds[i]=Math.random()}
-  const seaGeometry=new THREE.BufferGeometry();seaGeometry.setAttribute('position',new THREE.BufferAttribute(seaPositions,3));seaGeometry.setAttribute('aSeed',new THREE.BufferAttribute(seaSeeds,1));
-  const seaMaterial=new THREE.ShaderMaterial({transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,uniforms:{uTime:{value:0},uDpr:{value:renderer.getPixelRatio()}},vertexShader:`attribute float aSeed;uniform float uTime,uDpr;varying float vAlpha;void main(){vec3 p=position;p.y+=sin(p.x*.5+uTime*.65)*.035+sin(p.z*.8-uTime*.5)*.035;vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;gl_PointSize=clamp((6.+aSeed*19.)*uDpr/-mv.z,.65,4.*uDpr);vAlpha=(.08+pow(aSeed,14.)*.65)*(.45+.55*pow(sin(p.x*2.+p.z*3.+uTime*.6)*.5+.5,3.));vAlpha*=exp(-abs(p.x)*.026);}`,fragmentShader:`varying float vAlpha;void main(){float d=length(gl_PointCoord-.5);if(d>.5)discard;gl_FragColor=vec4(.72,.76,.69,(1.-d*2.)*vAlpha);}`});scene.add(new THREE.Points(seaGeometry,seaMaterial));
+  const sea=createSea(scene,mobile,renderer.getPixelRatio());
+  const reflectionMaterial=material.clone();reflectionMaterial.uniforms.uReflect.value=1;
+  const reflectionSamples=makeReflectionSamples(shapes,mobile);
+  const reflection=new THREE.Points(reflectionSamples.geometry,reflectionMaterial);reflection.frustumCulled=false;
+  const reflectedYacht=new THREE.Group();reflectedYacht.add(reflection);sea.reflectionScene.add(reflectedYacht);
   const composer=new EffectComposer(renderer);composer.addPass(new RenderPass(scene,camera));const bloom=new UnrealBloomPass(new THREE.Vector2(1,1),.62,.6,.62);composer.addPass(bloom);composer.addPass(new OutputPass());
-  let targetRotation=.12,rotation=.12,targetElevation=3.55,elevation=3.55,drag=false,lastX=0,lastY=0,raf=0,elapsed=0,lastTime=0,smooth=progress.current,chapter=-1,disposed=false;
-  function resize(){const w=el.clientWidth,h=el.clientHeight;renderer.setSize(w,h);composer.setSize(w,h);camera.aspect=w/h;camera.updateProjectionMatrix()};resize();window.addEventListener('resize',resize);
-  function down(e:PointerEvent){if(e.button!==0)return;drag=true;lastX=e.clientX;lastY=e.clientY;renderer.domElement.setPointerCapture(e.pointerId)}
-  function move(e:PointerEvent){if(!drag)return;targetRotation+=(e.clientX-lastX)*.006;targetElevation=THREE.MathUtils.clamp(targetElevation+(e.clientY-lastY)*.018,1.1,13);lastX=e.clientX;lastY=e.clientY}
-  function up(){drag=false}renderer.domElement.addEventListener('pointerdown',down);renderer.domElement.addEventListener('pointermove',move);renderer.domElement.addEventListener('pointerup',up);renderer.domElement.addEventListener('pointercancel',up);
+  const orbit=new CameraOrbit();
+  let activePointer:number|null=null,lastX=0,lastY=0,raf=0,elapsed=0,lastTime=0,smooth=progress.current,chapter=-1,disposed=false;
+  // The vessel and sea stay in world space; only the camera orbits.
+  yacht.rotation.y=.12;
+  function resize(){
+    const w=el.clientWidth,h=el.clientHeight;
+    renderer.setSize(w,h);composer.setSize(w,h);sea.resize(w,h);camera.aspect=w/h;
+    camera.setViewOffset(w,h,w>=800?-w*.085:0,0,w,h);
+    camera.updateProjectionMatrix();
+  }
+  resize();window.addEventListener('resize',resize);
+  function down(e:PointerEvent){
+    if(e.button!==0||activePointer!==null)return;
+    activePointer=e.pointerId;lastX=e.clientX;lastY=e.clientY;orbit.begin(e.timeStamp);
+    renderer.domElement.setPointerCapture(e.pointerId);
+  }
+  function move(e:PointerEvent){
+    if(e.pointerId!==activePointer)return;
+    orbit.move(e.clientX-lastX,e.clientY-lastY,e.timeStamp);lastX=e.clientX;lastY=e.clientY;
+  }
+  function up(e:PointerEvent){
+    if(e.pointerId!==activePointer)return;
+    activePointer=null;orbit.end(e.timeStamp,e.type!=='pointerup');
+    if(renderer.domElement.hasPointerCapture(e.pointerId))renderer.domElement.releasePointerCapture(e.pointerId);
+  }
+  function blur(){activePointer=null;orbit.end(performance.now(),true)}
+  function key(e:KeyboardEvent){
+    if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home'].includes(e.key))return;
+    e.preventDefault();e.stopPropagation();
+    if(e.key==='Home')orbit.reset();
+    else orbit.nudge(e.key==='ArrowLeft'?.15:e.key==='ArrowRight'?-.15:0,e.key==='ArrowUp'?.07:e.key==='ArrowDown'?-.07:0);
+  }
+  renderer.domElement.tabIndex=0;
+  renderer.domElement.setAttribute('aria-label','Orbit the yacht and sea: drag, or use arrow keys. Home resets the camera.');
+  renderer.domElement.addEventListener('pointerdown',down);renderer.domElement.addEventListener('pointermove',move);
+  renderer.domElement.addEventListener('pointerup',up);renderer.domElement.addEventListener('pointercancel',up);
+  renderer.domElement.addEventListener('lostpointercapture',up);renderer.domElement.addEventListener('keydown',key);
+  window.addEventListener('blur',blur);
   const contextLost=(e:Event)=>{e.preventDefault();setFailed(true);cancelAnimationFrame(raf)};renderer.domElement.addEventListener('webglcontextlost',contextLost);
-  resetRef.current=()=>{targetRotation=.12;targetElevation=3.55};
+  resetRef.current=()=>{orbit.reset()};
   const colors=['#e4c99c','#d7e1ec','#afd8d4','#bbcab1','#c8c2e9'];const color=new THREE.Color();
   function frame(time:number){if(disposed)return;raf=requestAnimationFrame(frame);const dt=Math.min((time-lastTime)/1000,.05)||.016;lastTime=time;if(document.hidden)return;if(!pausedRef.current&&!reduced)elapsed+=dt;
    smooth=THREE.MathUtils.damp(smooth,progress.current,5,dt);if(Math.abs(smooth-progress.current)<.0001)smooth=progress.current;const current=Math.min(3,Math.floor(smooth)),mix=Math.min(1,smooth-current);
-   if(chapter!==current){geometry.setAttribute('aFrom',new THREE.BufferAttribute(shapes[current],4));geometry.setAttribute('aTo',new THREE.BufferAttribute(shapes[current+1],4));chapter=current}
-   color.set(colors[current]).lerp(new THREE.Color(colors[current+1]),mix);for(const mat of [material,reflectionMaterial]){mat.uniforms.uMix.value=mix;mat.uniforms.uTime.value=elapsed;mat.uniforms.uColor.value.copy(color)}waterMaterial.uniforms.uTime.value=elapsed;seaMaterial.uniforms.uTime.value=elapsed;
-   rotation=THREE.MathUtils.damp(rotation,targetRotation,6,dt);elevation=THREE.MathUtils.damp(elevation,targetElevation,6,dt);yacht.rotation.y=rotation+(reduced||pausedRef.current?0:Math.sin(elapsed*.10)*.035);yacht.position.x=window.innerWidth<800?0:1.3;
-   const narrow=camera.aspect<1,dist=narrow?37:25;camera.position.set(-dist*.30,elevation*(narrow?1.4:1),dist);camera.lookAt(narrow?0:-.8,narrow?3.3:2.2,0);composer.render();
+   if(chapter!==current){geometry.setAttribute('aFrom',new THREE.BufferAttribute(shapes[current],4));geometry.setAttribute('aTo',new THREE.BufferAttribute(shapes[current+1],4));reflectionSamples.geometry.setAttribute('aFrom',new THREE.BufferAttribute(reflectionSamples.targets[current],4));reflectionSamples.geometry.setAttribute('aTo',new THREE.BufferAttribute(reflectionSamples.targets[current+1],4));chapter=current}
+   color.set(colors[current]).lerp(new THREE.Color(colors[current+1]),mix);for(const mat of [material,reflectionMaterial]){mat.uniforms.uMix.value=mix;mat.uniforms.uTime.value=elapsed;mat.uniforms.uColor.value.copy(color)}
+   orbit.update(dt,reduced);
+   const narrow=camera.aspect<1,radius=narrow?38.65:26.14,targetY=narrow?3.3:2.2;
+   const horizontal=radius*Math.cos(orbit.elevation);
+   camera.position.set(horizontal*Math.sin(orbit.azimuth),targetY+radius*Math.sin(orbit.elevation),horizontal*Math.cos(orbit.azimuth));
+   camera.lookAt(0,targetY,0);
+   reflectedYacht.position.copy(yacht.position);reflectedYacht.rotation.copy(yacht.rotation);
+   sea.render(renderer,camera,elapsed);composer.render();
   }raf=requestAnimationFrame(frame);setReady(true);
-  return()=>{disposed=true;cancelAnimationFrame(raf);window.removeEventListener('resize',resize);renderer.domElement.removeEventListener('pointerdown',down);renderer.domElement.removeEventListener('pointermove',move);renderer.domElement.removeEventListener('pointerup',up);renderer.domElement.removeEventListener('pointercancel',up);renderer.domElement.removeEventListener('webglcontextlost',contextLost);geometry.dispose();material.dispose();reflectionMaterial.dispose();waterGeometry.dispose();waterMaterial.dispose();seaGeometry.dispose();seaMaterial.dispose();bloom.dispose();composer.dispose();renderer.dispose();renderer.domElement.remove();resetRef.current=()=>{}};
+  return()=>{disposed=true;cancelAnimationFrame(raf);window.removeEventListener('resize',resize);window.removeEventListener('blur',blur);renderer.domElement.removeEventListener('lostpointercapture',up);renderer.domElement.removeEventListener('keydown',key);renderer.domElement.removeEventListener('pointerdown',down);renderer.domElement.removeEventListener('pointermove',move);renderer.domElement.removeEventListener('pointerup',up);renderer.domElement.removeEventListener('pointercancel',up);renderer.domElement.removeEventListener('webglcontextlost',contextLost);geometry.dispose();material.dispose();reflectionMaterial.dispose();reflectionSamples.geometry.dispose();sea.dispose();bloom.dispose();composer.dispose();renderer.dispose();renderer.domElement.remove();resetRef.current=()=>{}};
  },[progress,resetRef]);
- return <div ref={host} className="scene" role="img" aria-label="Interactive three-dimensional particle yacht reflected on a living sea. Drag horizontally to rotate and vertically to change the viewing angle.">{!ready&&!failed&&<div className="loading">The horizon is taking shape</div>}{failed&&<div className="fallback"><h2>A different horizon awaits.</h2><p>This 3D voyage needs WebGL. Enable graphics acceleration in your browser, then reload to explore the vessels.</p></div>}</div>
+ return <div ref={host} className="scene" role="img" aria-label="Interactive three-dimensional particle yacht reflected on a living sea. Drag to orbit the camera around the yacht and sea, with smooth release inertia.">{!ready&&!failed&&<div className="loading">The horizon is taking shape</div>}{failed&&<div className="fallback"><h2>A different horizon awaits.</h2><p>This 3D voyage needs WebGL. Enable graphics acceleration in your browser, then reload to explore the vessels.</p></div>}</div>
 }
