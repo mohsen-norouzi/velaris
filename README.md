@@ -11,7 +11,7 @@ bun install
 bun run dev
 ```
 
-Open the local address printed by the development server, normally http://localhost:3000.
+Open the local address printed by the development server, normally http://localhost:5173.
 
 ## Experience
 
@@ -32,7 +32,7 @@ bunx tsc --noEmit
 bun run build
 ```
 
-The website uses procedural 3D geometry and shader reflections, rather than flat yacht images. All five designs and their specifications are illustrative concepts. No external model, font, photograph, or audio downloads are needed at runtime. Nothing has been deployed.
+The website uses procedural 3D geometry and shader reflections, rather than flat yacht images. All five designs and their specifications are illustrative concepts. No external model, font, photograph, or audio downloads are needed at runtime. 
 
 ## Source map
 
@@ -43,4 +43,15 @@ The website uses procedural 3D geometry and shader reflections, rather than flat
 - `app/yacht-geometry.ts`: deterministic surface sampling for the five yacht designs.
 - `app/globals.css`: visual styling and responsive layout.
 
-The React app uses the generated Vinext/Vite development setup. Hosting scaffolding is present but no site was registered or published.
+## Deploy to Vercel
+
+The app builds as a static React/Vite website. `vercel.json` sets the Vite framework, `bun run build` command, and `dist` output directory. The build includes `dist/index.html`; no Cloudflare runtime is needed.
+
+1. Commit and push these changes to the repository connected to Vercel.
+2. In Vercel, use the repository folder containing this `package.json` as the Root Directory (leave it at the repository root if Velaris is the entire repository).
+3. Remove conflicting dashboard overrides, or set Framework Preset to **Vite**, Build Command to **bun run build**, and Output Directory to **dist**.
+4. Deploy the new commit. Redeploying an older commit will still use the old build setup.
+
+To check the production build locally, run `bun run build` followed by `bun run start` and open the address printed by Vite.
+
+The earlier Vinext/Cloudflare dependencies and scaffolding are retained but are no longer used by the app's development or production scripts.
